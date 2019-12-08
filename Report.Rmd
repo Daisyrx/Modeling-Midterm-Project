@@ -1,0 +1,176 @@
+---
+title: "Midterm Project Report"
+author: "Runxin Yu"
+date: "12/6/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE,echo = FALSE,warning = FALSE)
+pacman::p_load(tidyverse,dplyr,knitr,magrittr,formattable,ggplot2,plyr,plotly,anchors,lme4,tidyr,arm,rstanarm,loo)
+options(knitr.table.format = "latex")
+```
+
+# Introduction
+
+The dataset is called `Movie Industry: Three Decades of Movies` that contains 6820 movies in total(220 movies per year form 1986-2016) collected from 57 regions all over the world. The goal is to see how score of a movie is affected by different variables such as budget of the movie, revenue of the movie, duation of the movie, etc.\newline
+\newline
+
+### Columns of the Dataset
+Each movie has the following attributes:
+* `budget`: the budget of a movie. Some movies don't have this, so it appears as 0
+* `company`: the production company
+* `country`: country of origin
+* `director`: the director
+* `genre`: main genre of the movie
+* `gross`: revenue of the movie
+* `name`: name of the movie
+* `rating`: rating of the movie (R, PG, etc.)
+* `released`: release date (YYYY-MM-DD)
+* `runtime`: duration of the movie
+* `score`: IMDb user rating
+* `votes`: number of user votes
+* `star`: main actor/actress
+* `writer`: writer of the movie
+* `year`: year of release
+
+```{r echo=FALSE}
+movie <- read.csv("movies.csv")
+```
+
+# Exploratory Data Analysis(EDA)
+
+## Data Cleaning
+
+Reset the cells with a budget of 0 into NA and remove those rows from the data frame. New data frame without missing values is created in order for further exporation. Notice that some of the movies are produced by the same film company but are named differently, rename those companies so that their names are consistent. Another thing observed form the data is that there are 2179 film production companies, which is too large to set to be a random effect. Therefore, 7 of the world most famous film production companies,`Twentieth Century Fox`,`Columbia Pictures`,`Universal Pictures`,`Warner Bros.`,`Paramount Pictures`,`Walt Disney`, and `Metro-Goldwyn-Mayer`, as well as companies with counts greater that 50 are kept their original names, otherwise `others` is being labeled for the `company` column. This process reduce that number of different type of companies into 16, which can be used as a random effect.
+
+```{r Data Cleaning}
+# A budget of 0 means that the data is missing, so replace 0 elements with NA
+movie$budget <- movie$budget %>% na_if(0)
+# Change the  budget and gross columns into currency format
+movie$budget <- currency(movie$budget)
+movie$gross <- currency(movie$gross)
+# set a new table excluding all NA values
+movie.new <- na.omit(movie)
+summary(movie.new)
+
+movie.new$company <- ifelse(movie.new$company %in% c("Twentieth Century Fox Film Corporation", "Twentieth Century Fox Animation"),"Twentieth Century Fox",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Columbia Pictures Corporation","Columbia Pictures","	Columbia TriStar Home Video","Columbia Pictures Film Production Asia","Columbia Pictures Industries"),"Columbia Pictures",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Walt Disney Pictures","Walt Disney Feature Animation","Walt Disney Feature Animation Florida","Disney Television Animation","Walt Disney Animation Studios"),"Walt Disney",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Warner Bros.","Warner Bros. Animation","Warner Bros. Family Entertainment","Warner Independent Pictures (WIP)","Warner Bros. Digital Distribution","Warner Bros. Pictures"),"Warner Bros.",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Universal Pictures","Universal City Studios","Universal Pictures International (UPI)"),"Universal Pictures",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company == "Paramount Animation","Paramount Pictures",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company == "DreamWorks Animation","DreamWork",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Lions Gate Films","Lionsgate","Lions Gate Family Entertainment"),"Lionsgate",as.character(movie.new$company)) %>% as.factor()
+
+movie.new$company <- ifelse(movie.new$company %in% c("Twentieth Century Fox","Columbia Pictures","Walt Disney", "Warner Bros.","Universal Pictures","Paramount Pictures","Metro-Goldwyn-Mayer (MGM)","DreamWorks","Lionsgate","New Line Cinema","Touchstone Pictures","Miramax","TriStar Pictures","Fox 2000 Pictures","Dimension Films"),as.character(movie.new$company),"Others")
+
+```
+
+## Visually Explore the Data
+The plot below shows that there is a relationship between budget and score varying by different film production companies.
+```{r}
+plotly_build(ggplot(movie.new)+
+  geom_smooth(aes(x=budget, y=score, color = factor(company),alpha = 0.8), method = "lm",se = FALSE))
+```
+
+Though there are 57 regions in total in the data set, more than 80% of the data is collected from the United State. Therefore, the main focus is the film industries in the United State.
+
+```{r visuallization}
+usa <- movie.new %>% filter(country == "USA") %>% dplyr::select(budget,company,genre,name,runtime,score,gross,rating,star,votes,year)
+usa %<>% mutate(log.budget = log(budget),log.gross = log(gross),log.runtime = log(runtime),log.votes = log(votes))
+```
+
+
+# Linear Regression
+
+In order to see the relationships between ratings of movies and variables that may affect their scores furthermore, a simple linear regression is fitted to the original data. 
+
+```{r Linear Regression}
+movie.1 <- lm(formula = score ~ budget + runtime + gross + votes + factor(company),data=usa)
+summary(movie.1)
+ggplot(movie.1)+aes(x = .fitted,y = .stdresid)+geom_point()+geom_abline(intercept = 2.0,slope = 0.0, linetype = "dashed")+geom_abline(intercept = -2.0,slope = 0.0, linetype = "dashed")
+```
+
+The residual plot generating form the simple linear regression shows both `Heteroscedasticity` and `Nonlinear` issue and the R-square of approximately 0.35 is not very promissing. This pattern indicates that transformation to some of the variables is needed.\newline
+\newline
+The histogram of variables with very large skewness also indicates that a log tansformation is needed. \newline
+\newline
+
+```{r}
+# histogram on the original scale
+par(mfrow=c(2,2))
+hist(usa$budget)
+hist(usa$runtime)
+hist(usa$gross)
+hist(usa$votes)
+```
+
+Thus, log transformations are made to budget, runtime, gross and votes and fit the model again.\newline
+\newline
+
+```{r}
+# histogram on log scale
+par(mfrow=c(2,2))
+hist(usa$log.budget)
+hist(usa$log.runtime)
+hist(usa$log.gross)
+hist(usa$log.votes)
+movie.2 <- lm(formula = score ~ log.budget + log.runtime + log.gross + log.votes + factor(company),data=usa)
+summary(movie.2)
+```
+
+The new model after log transformation is slightly better than the one one without log transformation by looking at the residual plot, though it shows a large variance in the middle portion of the residual plot, and the R-square goes up to 0.41. However, improving of the model fitting is still needed. \newline
+\newline
+
+```{r}
+ggplot(movie.2)+aes(x = .fitted,y = .stdresid)+geom_point()+geom_abline(intercept = 2.0,slope = 0.0, linetype = "dashed")+geom_abline(intercept = -2.0,slope = 0.0, linetype = "dashed")
+```
+
+# Multilevel Model
+
+### Random Intercept Model
+
+```{r}
+movie.0 <- lmer(formula = score ~ log.budget + (1|company),data = usa)
+summary(movie.0)
+ggplot()+aes(fitted(movie.0),resid(movie.0))+geom_point()
+```
+
+A simple random intercept model is fitted with log.budget coefficient as will as its t value very small, that is budget(in log scale) does not have many effects on movie scores. However, the plot shows that there is some relationship between. A very large AIC, which indicates that this is not a good model. Thus, other variables are added to the model to see whether will improve the fit or not.
+
+```{r warning=FALSE}
+movie.lmer <- lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
+summary(movie.lmer)
+ggplot()+aes(fitted(movie.lmer),resid(movie.lmer))+geom_point() + geom_abline(intercept = -2.5,slope = 0.0, linetype = "dashed") + geom_abline(intercept = 2.5,slope = 0.0, linetype = "dashed")
+```
+
+The multilevel model with an intercept of -4.19 does not make too much sence because all scores should be positive numbers. \newline
+\newline
+So take a take log of the scores of movies in order to see if there are any changes.
+
+```{r warning=FALSE}
+movie.lmer2 <- lmer(log(score) ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
+summary(movie.lmer2)
+AIC(movie.lmer2)
+```
+
+# Stan to Fit Multilevel Model
+
+```{r}
+movie.stan <- stan_lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
+summary(movie.stan)
+kable(loo(movie.stan,save_psis = TRUE),align = c)
+print(loo(movie.stan,save_psis = TRUE))
+plot(loo(movie.stan))
+```
+
+Stan is fitted to the model and loo package is used to check goodness of fit of the model. The table above shows a summary of Pareto k diagnostic with a Pareto k estimates getting from loo function less than 0.5 and a Monte Carlo SE of elpd_loo 0.1, which kind of gives the sence that this model is a good fit. Also the plot of Pareto k diagnostic shows that all of the values are below 0.7. Moreover, in this case `p_loo` estimate of 19.7 also indicate the model is a good fit because the effective number of parameters (p_loo) is similar to the total number of parameters in the model. 
+
+# Summary
+
+Ideally, there should be a relationship between the scores of movies and the budegt of the movie varying by different film production companies and genre. However, none of the model gives a very good fit to support this hypothesis. Though the results given by stan indicates a good fit of the model, Pareto k estimates sometimes can be unreliable because of the sample size of the data. Therefore, more types of model need to be fitted in order to see the relationship between movie scores and budgets as well as make predictions base on the model.
+
+
+
+

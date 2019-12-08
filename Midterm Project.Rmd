@@ -1,0 +1,274 @@
+---
+title: "Midterm Project"
+author: "Runxin Yu"
+date: "11/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse,dplyr,knitr,magrittr,formattable,ggplot2,plyr,plotly,anchors,lme4,tidyr,arm)
+```
+
+# Explore the Data
+## Data Cleaning 
+
+Load the data and clean the data first
+```{r,echo=FALSE}
+movie <- read.csv("movies.csv")
+# A budget of 0 means that the data is missing, so replace 0 elements with NA
+movie$budget <- movie$budget %>% na_if(0)
+# Change the  budget and gross columns into currency format
+movie$budget <- currency(movie$budget)
+movie$gross <- currency(movie$gross)
+
+# set a new table excluding all NA values
+movie.new <- na.omit(movie)
+# make some changes of the names
+movie.new$country <- ifelse(movie.new$country == "Hong Kong","Hong Kong China",as.character(movie.new$country)) %>% as.factor()
+movie.new$country <- ifelse(movie.new$country == "China","Mainland China",as.character(movie.new$country)) %>% as.factor()
+```
+
+Check the number of companies listed in the dataset:
+```{r}
+sprintf("Number of movie companies listed is:%d ",length(unique(movie$company)))
+```
+
+Check the number of countries lised in the dataset
+```{r}
+sprintf("Number of movie countries listed is:%d",length(unique(movie$country)))
+```
+
+Take a look at the plot of the data
+```{r warning=FALSE}
+ggplot(movie.new) + geom_point(aes(y=budget,x=score, group=factor(year),color =factor(year)))  
+
+log.budget <- log(movie.new$budget)
+# distribution of the budget in log scale of movies within each country
+plotly_build(ggplot(movie.new) + aes(x= log.budget,color = country) + geom_density() + theme(legend.position = "none"))
+# distribution of the score of movies within each country
+plotly_build(ggplot(movie.new) + aes(x=score,color = country) + geom_density() + theme(legend.position = "none"))
+
+ggplot(movie.new) + aes(x=budget,y=score,color=country) + geom_smooth(aes(x=budget,y=score),data = filter(movie.new, country == "USA")) + theme(legend.position = "none")
+
+# ggplot(movie) + geom_point(aes(x=year,y=score))
+
+# ggplot(movie) + geom_point(aes(x=score,y=budget,group=factor(country),color=country)) + theme(legend.position = "none")
+```
+
+Gather the years
+```{r warning=FALSE}
+movie.new %<>% mutate(`Year Range`= ifelse(year == 1986:1995,"Early Age",
+                                          ifelse(year == 1996:2005,"Mid Age","Late Age")))
+
+ggplot(movie.new) + aes(x = `Year Range`) + geom_bar()+geom_text(stat='count', 
+  aes(label=..count..), vjust=0) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggplot(movie.new) + geom_point(aes(x=score,y=budget, group=as.factor(`Year Range`),color = as.factor(year))) + theme(legend.position = "none")
+```
+
+Just play around: take a look at Chinese movies
+```{r warning=FALSE}
+china <- movie.new %>% filter(country == "Mainland China" | country == "Hong Kong China") %>% dplyr::select(budget,company,director,gross,name,runtime,score,votes,star)
+```
+
+Since US has most counts in the whole dataset, take a look at USA movies
+```{r warning=FALSE}
+usa <- movie.new %>% filter(country == "USA") %>% dplyr::select(budget,director,genre,name,runtime,score,gross,rating,star,votes,year)
+
+ggplot(usa) + geom_point(aes(x=score,y=budget,group=factor(year),color = factor(year))) + theme(legend.position = "none") + facet_wrap(~genre,nrow = 3)
+
+ggplot(usa) + geom_point(aes(x=score,y=budget,group=factor(year),color = factor(year))) + geom_smooth(aes(x=score,y=budget),data = filter(usa, year == "2013"), se = FALSE)
+
+ggplot(usa) + stat_summary(aes(x=genre,y=score,color = factor(genre)),fun.ymin = min,fun.ymax = max,fun.y = mean) 
+
+ggplot(usa) + geom_bar(aes(x=score,color = factor(company)),fill = NA)
+
+# set year to be the group
+plotly_build(ggplot(usa)+
+  # geom_point(aes(x=budget, y=score, color = factor(year), alpha=0.8))+
+  geom_smooth(aes(x=budget, y=score, color = factor(year), alpha=0.2), method = "lm",se = FALSE)+
+  theme(legend.position = "none"))
+
+# set genre to be the group
+plotly_build(ggplot(movie.new)+
+  # geom_point(aes(x=budget, y=score, color = factor(genre), alpha=0.8))+
+  geom_smooth(aes(x=budget, y=score, color = factor(company),alpha = 0.8), method = "lm",se = FALSE))
+
+# distribution of the score of different genres
+plotly_build(ggplot(movie.new) + aes(x=score,color = genre) + geom_density() + theme(legend.position = "none"))
+```
+
+Try multilevel model
+```{r warning=FALSE}
+movie.1.coef <- lm(formula = score ~ budget + factor(year),data=usa)
+# display(movie.1.coef)
+summary(movie.1.coef)
+
+movie.coef.1 <- lm(formula = score ~ budget + year + genre,data = usa)
+summary(movie.coef.1)
+
+movie.2.coef <- lm(formula = score ~ budget + factor(genre),data = usa)
+summary(movie.2.coef)
+
+# genre as group has higher adjusted R-square
+movie.3.coef <- lmer(formula = score ~ budget + (1|genre),data = usa)
+display(movie.3.coef)
+
+# Since there is a warning saying that "Some predictor variables are on very different scales: consider rescaling", take log to budget to see whether there are any differences
+usa %<>% mutate(log.budget = log(budget))
+movie.4.coef <- lmer(formula = score ~ log.budget + (1|genre),data = usa)
+display(movie.4.coef)
+# The log.budget coefficient of 0.03 means that with every unit increase of budget in log scale, the score of the movie is expected to increase by 0.03. It is the same for every movie.
+
+# Extend the 4th model to include runtime and number of votes as predictors to see how model fit
+movie.5.coef <- lmer(formula = score ~ log.budget + runtime + votes + (1|genre),data = usa)
+# The warning saying that "Some predictor variables are on very different scales: consider rescaling" appeared again, thus rescale numbter of votes and runtime (take log transformation of both predictors)
+usa %<>% mutate(log.runtime = log(runtime),log.votes = log(votes))
+movie.6.coef <- lmer(formula = score ~ factor(log.budget) + factor(log.runtime) + factor(log.votes) + (1|genre),data = usa)
+display(movie.6.coef)
+
+# add year as another group
+movie.7.coef <- lmer(formula = score ~ log.budget + (1|genre) + (1|year),data = usa)
+display(movie.7.coef)
+
+movie.8.coef <- lmer(formula = score ~ log.budget + log.runtime + log.votes + (1|genre) + (1|year),data = usa)
+display(movie.8.coef)
+ggplot()+aes(fitted(movie.8.coef),resid(movie.8.coef))+geom_point()
+pacman::p_load(car)
+plot(movie.8.coef,resid(.,scale = TRUE)~fitted(.))
+hist(usa$log.budget)
+ranef(movie.8.coef)
+ggplot(usa)+aes(x = log.runtime,y = log(score))+geom_point()
+movie.10.coef <- lmer(formula = log(score) ~ log.budget + 1/log.runtime + log.votes + (1|genre) + (1|year),data = usa)
+
+plot(movie.10.coef,resid(.,scale = TRUE)~fitted(.))
+```
+
+
+```{r warning=FALSE}
+movie.1 <- lm(score ~ factor(rating) - 1,data = usa)
+display(movie.1)
+ggplot(movie.1) + aes(x = .fitted, y = .stdresid)+geom_point()+geom_abline(intercept = 2.0,slope = 0.0, linetype = "dashed")
+
+movie.2 <- lmer(formula = log(score) ~ log.budget + log(gross) + log.runtime + log.votes + (1|genre) + (1|year), data = usa)
+display(movie.2)
+ranef(movie.2)
+ggplot(usa) + aes(x=log(gross),y=score)+geom_point()
+p <- ggplot()+aes(fitted(movie.2),resid(movie.2))+geom_point()
+plotly_build(p)
+# take rating as a random effect
+movie.3 <- lmer(formula = log(score) ~ log.budget + log(gross) + log.runtime + log.votes + (1|rating),data = usa)
+display(movie.3)
+ranef(movie.3)
+ggplot()+aes(fitted(movie.3),resid(movie.3))+geom_point()
+
+# rename the genres
+usa$genre <- ifelse(usa$genre %in% c("Family","Musical","Romance","Sci-Fi","Thriller"),"Other",as.character(usa$genre)) %>% as.factor()
+# re-fit the multilevel model
+movie.2 <- lmer(formula = log(score) ~ log.budget + log(gross) + log.runtime + log.votes + (1|genre) + (1|year), data = usa)
+display(movie.2)
+ranef(movie.2) # random effect not very useful
+ggplot()+aes(fitted(movie.2),resid(movie.2))+geom_point()
+
+
+# re-group companies
+movie.new$company <- ifelse(movie.new$company %in% c("Twentieth Century Fox Film Corporation", "Twentieth Century Fox Animation"),"Twentieth Century Fox",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Columbia Pictures Corporation","Columbia Pictures","	Columbia TriStar Home Video","Columbia Pictures Film Production Asia","Columbia Pictures Industries"),"Columbia Pictures",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Walt Disney Pictures","Walt Disney Feature Animation","Walt Disney Feature Animation Florida","Disney Television Animation","Walt Disney Animation Studios"),"Walt Disney",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Warner Bros.","Warner Bros. Animation","Warner Bros. Family Entertainment","Warner Independent Pictures (WIP)","Warner Bros. Digital Distribution","Warner Bros. Pictures"),"Warner Bros.",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Universal Pictures","Universal City Studios","Universal Pictures International (UPI)"),"Universal Pictures",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company == "Paramount Animation","Paramount Pictures",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company == "DreamWorks Animation","DreamWork",as.character(movie.new$company)) %>% as.factor()
+movie.new$company <- ifelse(movie.new$company %in% c("Lions Gate Films","Lionsgate","Lions Gate Family Entertainment"),"Lionsgate",as.character(movie.new$company)) %>% as.factor()
+
+# the most famous film production companies are Metro-Goldwyn-Mayer, Warner Bros., Paramount Pictures,Columbia Pictures, Universal Pictures, Twentieth Century Fox, Walt Disney
+sum(movie.new == "Twentieth Century Fox")
+sum(movie.new == "Columbia Pictures")
+sum(movie.new == "Walt Disney")
+sum(movie.new == "Warner Bros.")
+sum(movie.new == "Universal Pictures")
+sum(movie.new == "Paramount Pictures")
+sum(movie.new == "Metro-Goldwyn-Mayer (MGM)")
+
+sum(movie.new == "New Line Cinema")
+
+sum(movie.new == "DreamWorks")
+sum(movie.new == "Lionsgate")
+
+# leave the name of the film product companies above otherwise change names into others
+movie.new$company <- ifelse(movie.new$company %in% c("Twentieth Century Fox","Columbia Pictures","Walt Disney", "Warner Bros.","Universal Pictures","Paramount Pictures","Metro-Goldwyn-Mayer (MGM)","DreamWorks","Lionsgate","New Line Cinema","Touchstone Pictures","Miramax","TriStar Pictures","Fox 2000 Pictures","Dimension Films"),as.character(movie.new$company),"Others")
+
+usa <- movie.new %>% filter(country == "USA") %>% dplyr::select(budget,company,genre,name,runtime,score,gross,rating,star,votes,year)
+usa %<>% mutate(log.budget = log(budget),log.gross = log(gross),log.runtime = log(runtime),log.votes = log(votes))
+
+movie.fit1 <- lmer(log(score) ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
+movie.fit1
+display(movie.fit1)
+ranef(movie.fit1)
+ggplot()+aes(fitted(movie.fit1),resid(movie.fit1))+geom_point() + geom_abline(intercept = -0.5,slope = 0.0, linetype = "dashed")
+ggplot(movie.fit1)+aes(sample = .resid)+stat_qq() + stat_qq_line(linetype = "dashed")
+residual <- resid(movie.fit1)
+
+movie.stan1 <- stan_lmer(score ~ budget + gross + runtime + votes + (1|company),data = usa)
+summary(movie.stan1)
+loo(movie.stan1)
+plot(loo1)
+
+movie.stan2 <- stan_lmer(log(score) ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
+summary(movie.stan2)
+loo2 <- loo(movie.stan2)
+loo2
+plot(loo2)
+
+
+
+# ppc_loo_pit_overlay(roaches$y, yrep, lw = weights(loo1$psis_object))
+# form the original data observe that the datapoint with residual smaller than -0.5 are the points with score less than 3.6, thus get rid of those points and fit the model again.
+keep <- residual[residual > -0.5]
+usa %<>% filter(score >= 3.6)
+movie.fit2 <- lmer(log(score) ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
+display(movie.fit2)
+ranef(movie.fit2)
+ggplot()+aes(fitted(movie.fit1),keep)+geom_point()
+
+hist(scale(usa$gross,center = TRUE,scale = TRUE))
+hist(usa$log.gross)
+hist((usa$gross)^(1/3))
+usa %<>% mutate(cube.gross = gross^(1/3))
+movie.cube <- lmer(log(score) ~ log.budget + cube.gross + log.runtime + log.votes + (1|company),data = usa)
+movie.cube
+
+score.c <- (usa$score - mean(usa$score))/sd(usa$score)
+movie.fit1 <- lmer(score.c ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa) 
+movie.fit1
+display(movie.fit1)
+
+budget.c <- (usa$budget - mean(usa$budget))/sd(usa$budget)
+gross.c <- (usa$gross - mean(usa$gross))/sd(usa$gross)
+runtime.c <- (usa$runtime - mean(usa$runtime))/sd(usa$runtime)
+votes.c <- (usa$votes - mean(usa$votes))/sd(usa$votes)
+
+# NO!
+movie.fit2 <- lmer(score.c ~ budget.c + gross.c + runtime.c + votes.c + (1|company),data = usa) 
+display(movie.fit2)
+ranef(movie.fit2)
+confint(movie.fit2)
+summary(movie.fit2)
+ggplot()+aes(fitted(movie.fit2),resid(movie.fit2))+geom_point() #+ geom_abline(intercept = -0.5,slope = 0.0, linetype = "dashed")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
