@@ -7,7 +7,7 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(message = FALSE,echo = FALSE,warning = FALSE)
-pacman::p_load(tidyverse,dplyr,knitr,magrittr,formattable,ggplot2,plyr,plotly,anchors,lme4,tidyr,arm,rstanarm,loo)
+pacman::p_load(tidyverse,dplyr,knitr,magrittr,formattable,ggplot2,plyr,plotly,anchors,lme4,tidyr,arm,rstanarm,loo,car)
 options(knitr.table.format = "latex")
 ```
 
@@ -68,10 +68,12 @@ movie.new$company <- ifelse(movie.new$company %in% c("Twentieth Century Fox","Co
 ```
 
 ## Visually Explore the Data
-The plot below shows that there is a relationship between budget and score varying by different film production companies.
+The plot below shows that there is a relationship between budget and score varying by different film production companies. The density plot shows that the score follows a approximately normal distribution.
 ```{r}
-plotly_build(ggplot(movie.new)+
-  geom_smooth(aes(x=budget, y=score, color = factor(company),alpha = 0.8), method = "lm",se = FALSE))
+ggplot(movie.new)+
+  geom_smooth(aes(x=budget, y=score, color = factor(company),alpha = 0.8), method = "lm",se = FALSE)
+# distribution of the score of different genres
+ggplot(movie.new) + aes(x=score,color = company) + geom_density() + theme(legend.position = "none")
 ```
 
 Though there are 57 regions in total in the data set, more than 80% of the data is collected from the United State. Therefore, the main focus is the film industries in the United State.
@@ -80,7 +82,6 @@ Though there are 57 regions in total in the data set, more than 80% of the data 
 usa <- movie.new %>% filter(country == "USA") %>% dplyr::select(budget,company,genre,name,runtime,score,gross,rating,star,votes,year)
 usa %<>% mutate(log.budget = log(budget),log.gross = log(gross),log.runtime = log(runtime),log.votes = log(votes))
 ```
-
 
 # Linear Regression
 
@@ -134,7 +135,7 @@ ggplot(movie.2)+aes(x = .fitted,y = .stdresid)+geom_point()+geom_abline(intercep
 ```{r}
 movie.0 <- lmer(formula = score ~ log.budget + (1|company),data = usa)
 summary(movie.0)
-ggplot()+aes(fitted(movie.0),resid(movie.0))+geom_point()
+Anova(movie.0)
 ```
 
 A simple random intercept model is fitted with log.budget coefficient as will as its t value very small, that is budget(in log scale) does not have many effects on movie scores. However, the plot shows that there is some relationship between. A very large AIC, which indicates that this is not a good model. Thus, other variables are added to the model to see whether will improve the fit or not.
@@ -143,23 +144,26 @@ A simple random intercept model is fitted with log.budget coefficient as will as
 movie.lmer <- lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
 summary(movie.lmer)
 ggplot()+aes(fitted(movie.lmer),resid(movie.lmer))+geom_point() + geom_abline(intercept = -2.5,slope = 0.0, linetype = "dashed") + geom_abline(intercept = 2.5,slope = 0.0, linetype = "dashed")
+confint(movie.lmer)
 ```
 
-The multilevel model with an intercept of -4.19 does not make too much sence because all scores should be positive numbers. \newline
+The 95% confidence interval shows that evry fixed effect estimates are significant besides log.gross. This shows that budget of the movie(in log scale), runtime of the movie(in log scale) and number of votes(in log scale) will affect the score of a movie. Among all, it is interesting that runtime have a positive relationship with the score of the movie. It is also interesting that with evry unit increase in runtime(in log scale), the score of a movie will is expected to increase by 2.3, which is a significant amount of increase. The variance of the random effect company is close to 0, which means that there are no huge differences in scores among different film production companies. The residual plot still shows a large variance in the middle portion. \newline
 \newline
-So take a take log of the scores of movies in order to see if there are any changes.
+Notice that genre can be another group factor, so can be added to the model.
 
 ```{r warning=FALSE}
-movie.lmer2 <- lmer(log(score) ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
+movie.lmer2 <- lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company) + (1|genre),data = usa)
 summary(movie.lmer2)
-AIC(movie.lmer2)
+confint(movie.lmer2)
 ```
+
+An estimate of the variance of 0.14 explained by the random effect genre indicates that scores varies slightly between different genres. The model still gives the same significant fixed effect estimates: budget(in log scale), runtime(in log scale),votes(in log scale). 
 
 # Stan to Fit Multilevel Model
 
-```{r}
+```{r message=FALSE}
 movie.stan <- stan_lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
-summary(movie.stan)
+posterior_interval(movie.stan)
 print(loo(movie.stan,save_psis = TRUE))
 plot(loo(movie.stan))
 ```
@@ -169,6 +173,67 @@ Stan is fitted to the model and loo package is used to check goodness of fit of 
 # Summary
 
 Ideally, there should be a relationship between the scores of movies and the budegt of the movie varying by different film production companies and genre. However, none of the model gives a very good fit to support this hypothesis. Though the results given by stan indicates a good fit of the model, Pareto k estimates sometimes can be unreliable because of the sample size of the data. Therefore, more types of model need to be fitted in order to see the relationship between movie scores and budgets as well as make predictions base on the model.
+
+
+```{r}
+# make some changes of the names
+# movie.new$country <- ifelse(movie.new$country == "Hong Kong","Hong Kong China",as.character(movie.new$country)) %>% as.factor()
+# movie.new$country <- ifelse(movie.new$country == "China","Mainland China",as.character(movie.new$country)) %>% as.factor()
+
+#p1 <- ggplot(movie.new) + geom_point(aes(y=score,x=budget, group=factor(year),color =factor(year))) + theme(legend.position = "none")
+
+#log.budget <- log(movie.new$budget)
+# distribution of the budget in log scale of movies within each country
+#p2 <- plotly_build(ggplot(movie.new) + aes(x= log.budget,color = country) + geom_density() + theme(legend.position = "none"))
+# distribution of the score of movies within each country
+#p3 <- plotly_build(ggplot(movie.new) + aes(x=score,color = country) + geom_density() + theme(legend.position = "none"))
+
+#p4 <- ggplot(usa) + geom_point(aes(x=score,y=budget,group=factor(year),color = factor(year))) + theme(legend.position = "none") + facet_wrap(~genre,nrow = 3)
+
+#p5 <- ggplot(usa) + stat_summary(aes(x=genre,y=score,color = factor(genre)),fun.ymin = min,fun.ymax = max,fun.y = mean) 
+
+#p6 <- ggplot(usa) + geom_bar(aes(x=score,color = factor(company)),fill = NA)
+
+# set year to be the group
+#p7 <- plotly_build(ggplot(usa)+
+  # geom_point(aes(x=budget, y=score, color = factor(year), alpha=0.8))+
+  #geom_smooth(aes(x=budget, y=score, color = factor(year), alpha=0.2), method = "lm",se = FALSE)+
+  #theme(legend.position = "none"))
+
+# set genre to be the group
+#p8 <- plotly_build(ggplot(movie.new)+
+   #geom_point(aes(x=budget, y=score, color = factor(genre), alpha=0.8))+
+  #geom_smooth(aes(x=budget, y=score, color = factor(company),alpha = 0.8), method = "lm",se = FALSE))
+
+#movie.3.coef <- lmer(formula = score ~ budget + (1|genre),data = usa)
+#movie.4.coef <- lmer(formula = score ~ log.budget + (1|genre),data = usa)
+#movie.5.coef <- lmer(formula = score ~ log.budget + runtime + votes + (1|genre),data = usa)
+#movie.6.coef <- lmer(formula = score ~ factor(log.budget) + factor(log.runtime) + factor(log.votes) + (1|genre),data = usa)
+#movie.7.coef <- lmer(formula = score ~ log.budget + (1|genre) + (1|year),data = usa)
+#movie.8.coef <- lmer(formula = score ~ log.budget + log.runtime + log.votes + (1|genre) + (1|year),data = usa)
+#ggplot()+aes(fitted(movie.8.coef),resid(movie.8.coef))+geom_point()
+#plot(movie.8.coef,resid(.,scale = TRUE)~fitted(.))
+#hist(usa$log.budget)
+# ggplot(usa)+aes(x = log.runtime,y = log(score))+geom_point()
+#movie.10.coef <- lmer(formula = log(score) ~ log.budget + 1/log.runtime + log.votes + (1|genre) + (1|year),data = usa)
+#plot(movie.10.coef,resid(.,scale = TRUE)~fitted(.))
+
+#movie.2 <- lmer(formula = log(score) ~ log.budget + log(gross) + log.runtime + log.votes + (1|genre) + (1|year), data = usa)
+#movie.3 <- lmer(formula = log(score) ~ log.budget + log(gross) + log.runtime + log.votes + (1|rating),data = usa)
+
+# usa %<>% mutate(cube.gross = gross^(1/3))
+# movie.cube <- lmer(log(score) ~ log.budget + cube.gross + log.runtime + log.votes + (1|company),data = usa)
+
+#score.c <- (usa$score - mean(usa$score))/sd(usa$score)
+#movie.fit1 <- lmer(score.c ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa) 
+
+#budget.c <- (usa$budget - mean(usa$budget))/sd(usa$budget)
+#gross.c <- (usa$gross - mean(usa$gross))/sd(usa$gross)
+#runtime.c <- (usa$runtime - mean(usa$runtime))/sd(usa$runtime)
+#votes.c <- (usa$votes - mean(usa$votes))/sd(usa$votes)
+
+#movie.fit2 <- lmer(score.c ~ budget.c + gross.c + runtime.c + votes.c + (1|company),data = usa) 
+```
 
 
 
