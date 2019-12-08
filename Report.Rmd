@@ -160,7 +160,6 @@ AIC(movie.lmer2)
 ```{r}
 movie.stan <- stan_lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
 summary(movie.stan)
-kable(loo(movie.stan,save_psis = TRUE),align = c)
 print(loo(movie.stan,save_psis = TRUE))
 plot(loo(movie.stan))
 ```
