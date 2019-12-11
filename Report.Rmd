@@ -6,7 +6,6 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(message = FALSE,echo = FALSE,warning = FALSE)
 pacman::p_load(tidyverse,dplyr,knitr,magrittr,formattable,ggplot2,plyr,plotly,anchors,lme4,tidyr,arm,rstanarm,loo,car)
 options(knitr.table.format = "latex")
 ```
@@ -18,6 +17,7 @@ The dataset is called `Movie Industry: Three Decades of Movies` that contains 68
 
 ### Columns of the Dataset
 Each movie has the following attributes:
+
 * `budget`: the budget of a movie. Some movies don't have this, so it appears as 0
 * `company`: the production company
 * `country`: country of origin
@@ -44,7 +44,7 @@ movie <- read.csv("movies.csv")
 
 Reset the cells with a budget of 0 into NA and remove those rows from the data frame. New data frame without missing values is created in order for further exporation. Notice that some of the movies are produced by the same film company but are named differently, rename those companies so that their names are consistent. Another thing observed form the data is that there are 2179 film production companies, which is too large to set to be a random effect. Therefore, 7 of the world most famous film production companies,`Twentieth Century Fox`,`Columbia Pictures`,`Universal Pictures`,`Warner Bros.`,`Paramount Pictures`,`Walt Disney`, and `Metro-Goldwyn-Mayer`, as well as companies with counts greater that 50 are kept their original names, otherwise `others` is being labeled for the `company` column. This process reduce that number of different type of companies into 16, which can be used as a random effect.
 
-```{r Data Cleaning}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 # A budget of 0 means that the data is missing, so replace 0 elements with NA
 movie$budget <- movie$budget %>% na_if(0)
 # Change the  budget and gross columns into currency format
@@ -69,7 +69,7 @@ movie.new$company <- ifelse(movie.new$company %in% c("Twentieth Century Fox","Co
 
 ## Visually Explore the Data
 The plot below shows that there is a relationship between budget and score varying by different film production companies. The density plot shows that the score follows a approximately normal distribution.
-```{r}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 ggplot(movie.new)+
   geom_smooth(aes(x=budget, y=score, color = factor(company),alpha = 0.8), method = "lm",se = FALSE)
 # distribution of the score of different genres
@@ -78,7 +78,7 @@ ggplot(movie.new) + aes(x=score,color = company) + geom_density() + theme(legend
 
 Though there are 57 regions in total in the data set, more than 80% of the data is collected from the United State. Therefore, the main focus is the film industries in the United State.
 
-```{r visuallization}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 usa <- movie.new %>% filter(country == "USA") %>% dplyr::select(budget,company,genre,name,runtime,score,gross,rating,star,votes,year)
 usa %<>% mutate(log.budget = log(budget),log.gross = log(gross),log.runtime = log(runtime),log.votes = log(votes))
 ```
@@ -87,7 +87,7 @@ usa %<>% mutate(log.budget = log(budget),log.gross = log(gross),log.runtime = lo
 
 In order to see the relationships between ratings of movies and variables that may affect their scores furthermore, a simple linear regression is fitted to the original data. 
 
-```{r Linear Regression}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 movie.1 <- lm(formula = score ~ budget + runtime + gross + votes + factor(company),data=usa)
 summary(movie.1)
 ggplot(movie.1)+aes(x = .fitted,y = .stdresid)+geom_point()+geom_abline(intercept = 2.0,slope = 0.0, linetype = "dashed")+geom_abline(intercept = -2.0,slope = 0.0, linetype = "dashed")
@@ -98,7 +98,7 @@ The residual plot generating form the simple linear regression shows both `Heter
 The histogram of variables with very large skewness also indicates that a log tansformation is needed. \newline
 \newline
 
-```{r}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 # histogram on the original scale
 par(mfrow=c(2,2))
 hist(usa$budget)
@@ -110,7 +110,7 @@ hist(usa$votes)
 Thus, log transformations are made to budget, runtime, gross and votes and fit the model again.\newline
 \newline
 
-```{r}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 # histogram on log scale
 par(mfrow=c(2,2))
 hist(usa$log.budget)
@@ -124,7 +124,7 @@ summary(movie.2)
 The new model after log transformation is slightly better than the one one without log transformation by looking at the residual plot, though it shows a large variance in the middle portion of the residual plot, and the R-square goes up to 0.41. However, improving of the model fitting is still needed. \newline
 \newline
 
-```{r}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 ggplot(movie.2)+aes(x = .fitted,y = .stdresid)+geom_point()+geom_abline(intercept = 2.0,slope = 0.0, linetype = "dashed")+geom_abline(intercept = -2.0,slope = 0.0, linetype = "dashed")
 ```
 
@@ -132,7 +132,7 @@ ggplot(movie.2)+aes(x = .fitted,y = .stdresid)+geom_point()+geom_abline(intercep
 
 ### Random Intercept Model
 
-```{r}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 movie.0 <- lmer(formula = score ~ log.budget + (1|company),data = usa)
 summary(movie.0)
 Anova(movie.0)
@@ -140,7 +140,7 @@ Anova(movie.0)
 
 A simple random intercept model is fitted with log.budget coefficient as will as its t value very small, that is budget(in log scale) does not have many effects on movie scores. However, the plot shows that there is some relationship between. A very large AIC, which indicates that this is not a good model. Thus, other variables are added to the model to see whether will improve the fit or not.
 
-```{r warning=FALSE}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 movie.lmer <- lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
 summary(movie.lmer)
 ggplot()+aes(fitted(movie.lmer),resid(movie.lmer))+geom_point() + geom_abline(intercept = -2.5,slope = 0.0, linetype = "dashed") + geom_abline(intercept = 2.5,slope = 0.0, linetype = "dashed")
@@ -151,7 +151,7 @@ The 95% confidence interval shows that evry fixed effect estimates are significa
 \newline
 Notice that genre can be another group factor, so can be added to the model.
 
-```{r warning=FALSE}
+```{r message = FALSE,warning = FALSE,echo=FALSE}
 movie.lmer2 <- lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company) + (1|genre),data = usa)
 summary(movie.lmer2)
 confint(movie.lmer2)
@@ -161,9 +161,13 @@ An estimate of the variance of 0.14 explained by the random effect genre indicat
 
 # Stan to Fit Multilevel Model
 
-```{r message=FALSE}
+```{r results='hide',message = FALSE,warning = FALSE,echo=FALSE}
 movie.stan <- stan_lmer(score ~ log.budget + log.gross + log.runtime + log.votes + (1|company),data = usa)
+```
+```{r message = FALSE,warning = FALSE,echo=FALSE}
+# posterior interval
 posterior_interval(movie.stan)
+# goodness of fit
 print(loo(movie.stan,save_psis = TRUE))
 plot(loo(movie.stan))
 ```
@@ -173,8 +177,9 @@ Stan is fitted to the model and loo package is used to check goodness of fit of 
 # Summary
 
 Ideally, there should be a relationship between the scores of movies and the budegt of the movie varying by different film production companies and genre. However, none of the model gives a very good fit to support this hypothesis. Though the results given by stan indicates a good fit of the model, Pareto k estimates sometimes can be unreliable because of the sample size of the data. Therefore, more types of model need to be fitted in order to see the relationship between movie scores and budgets as well as make predictions base on the model.
+\newpage
 
-
+# Appendix
 ```{r}
 # make some changes of the names
 # movie.new$country <- ifelse(movie.new$country == "Hong Kong","Hong Kong China",as.character(movie.new$country)) %>% as.factor()
